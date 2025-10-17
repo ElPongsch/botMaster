@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "botmaster"
+version = "0.1.0"
+description = "Headless CLI LLM Agent Orchestrator with Telegram integration"
+authors = [{name = "botMaster", email = "you@example.com"}]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32",
+]
+
+[project.scripts]
+botmaster = "botmaster.cli:main"
+botmaster-send = "botmaster.cli:send_cli"
+botmaster-daemon = "botmaster.cli:daemon"
+
