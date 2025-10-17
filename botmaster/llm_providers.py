@@ -3,6 +3,10 @@ from __future__ import annotations
 import os
 import requests
 from typing import List, Dict, Optional
+import subprocess
+import json
+import shlex
+import sys
 
 
 class LLMProvider:
@@ -112,7 +116,51 @@ class GeminiProvider(LLMProvider):
         return ""
 
 
-def make_provider(name: str, anthropic_key: Optional[str], openai_key: Optional[str], gemini_key: Optional[str], default_model: Optional[str] = None) -> LLMProvider:
+class CommandProvider(LLMProvider):
+    """
+    Executes a user-specified command and exchanges a simple JSON payload via stdin/stdout.
+    - Input JSON: { system, messages, model, temperature }
+    - Output: either JSON with { text } or plain text on stdout.
+    """
+
+    def __init__(self, command: str, timeout_sec: int = 90):
+        self.command = command
+        self.timeout_sec = timeout_sec
+
+    def generate(self, system_prompt: str, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.2) -> str:
+        payload = {
+            "system": system_prompt,
+            "messages": messages,
+            "model": model,
+            "temperature": temperature,
+        }
+        try:
+            # Windows-friendly: use shell=True for command strings the user provides
+            proc = subprocess.run(
+                self.command,
+                input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self.timeout_sec,
+                shell=True,
+            )
+        except subprocess.TimeoutExpired:
+            return "[CommandProvider Timeout]"
+        if proc.returncode != 0:
+            err = proc.stderr.decode(errors="ignore")
+            return f"[CommandProvider Error {proc.returncode}] {err.strip()}"
+        out = proc.stdout.decode("utf-8", errors="ignore").strip()
+        # Try JSON first
+        try:
+            obj = json.loads(out)
+            if isinstance(obj, dict) and "text" in obj:
+                return str(obj["text"]) or ""
+        except Exception:
+            pass
+        return out
+
+
+def make_provider(name: str, anthropic_key: Optional[str], openai_key: Optional[str], gemini_key: Optional[str], default_model: Optional[str] = None, provider_cmd: Optional[str] = None, provider_timeout_sec: int = 90) -> LLMProvider:
     key = name.strip().lower()
     if key in ("anthropic", "claude"):
         if not anthropic_key:
@@ -126,5 +174,8 @@ def make_provider(name: str, anthropic_key: Optional[str], openai_key: Optional[
         if not gemini_key:
             raise ValueError("GEMINI_API_KEY fehlt.")
         return GeminiProvider(gemini_key, default_model)
+    if key in ("cmd", "local", "claude-code", "cursor"):
+        if not provider_cmd:
+            raise ValueError("BM_PROVIDER_CMD fehlt für lokalen/headless Provider.")
+        return CommandProvider(provider_cmd, timeout_sec=provider_timeout_sec)
     raise ValueError(f"Unbekannter Provider: {name}")
-

@@ -39,7 +39,15 @@ def send_cli():
 def daemon():
     settings = load_settings()
     storage = Storage(settings.db_url)
-    provider = make_provider(settings.default_provider, settings.anthropic_api_key, settings.openai_api_key, settings.gemini_api_key, settings.default_model)
+    provider = make_provider(
+        settings.default_provider,
+        settings.anthropic_api_key,
+        settings.openai_api_key,
+        settings.gemini_api_key,
+        settings.default_model,
+        provider_cmd=settings.provider_cmd,
+        provider_timeout_sec=settings.provider_timeout_sec,
+    )
     manager = AgentManager(settings, storage, provider)
 
     projects = _discover_projects(settings.project_dirs)
@@ -145,4 +153,3 @@ def main():
         return
 
     parser.print_help()
-

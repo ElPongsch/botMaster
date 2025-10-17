@@ -21,6 +21,8 @@ class Settings:
     gemini_api_key: str | None
     default_provider: str
     default_model: str | None
+    provider_cmd: str | None
+    provider_timeout_sec: int
 
     # Storage
     data_dir: Path
@@ -60,6 +62,8 @@ def load_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         default_provider=os.getenv("BM_DEFAULT_PROVIDER", "anthropic"),
         default_model=os.getenv("BM_DEFAULT_MODEL"),
+        provider_cmd=os.getenv("BM_PROVIDER_CMD"),
+        provider_timeout_sec=int(os.getenv("BM_PROVIDER_TIMEOUT", "90")),
         data_dir=data_dir,
         db_url=db_url,
         project_dirs=project_dirs,
@@ -74,4 +78,3 @@ def load_settings() -> Settings:
         max_context_messages=int(os.getenv("BM_MAX_CONTEXT_MESSAGES", "20")),
         enable_telegram_polling=_bool(os.getenv("BM_ENABLE_TELEGRAM_POLLING", "1")),
     )
-
