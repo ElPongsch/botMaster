@@ -1,0 +1,4 @@
+[console_scripts]
+botmaster = botmaster.cli:main
+botmaster-daemon = botmaster.cli:daemon
+botmaster-send = botmaster.cli:send_cli

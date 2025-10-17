@@ -17,3 +17,5 @@ botmaster = "botmaster.cli:main"
 botmaster-send = "botmaster.cli:send_cli"
 botmaster-daemon = "botmaster.cli:daemon"
 
+[tool.setuptools]
+packages = ["botmaster", "mcp"]
