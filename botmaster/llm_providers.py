@@ -171,6 +171,7 @@ class ClaudeCLIStreamProvider(LLMProvider):
     """
 
     def __init__(self, claude_bin: str = "claude", mcp_config_path: Optional[str] = None, cwd: Optional[str] = None, instructions: Optional[str] = None, session_id: Optional[str] = None):
+        # claude_bin may be a full command string, e.g. "wsl -e claude"
         self.claude_bin = claude_bin
         self.mcp_config_path = mcp_config_path
         self.cwd = cwd
@@ -195,7 +196,11 @@ class ClaudeCLIStreamProvider(LLMProvider):
         ]
         if self.mcp_config_path:
             args += ["--mcp-config", self.mcp_config_path]
-        cmd = [self.claude_bin] + args
+        # Build command; with shell=True prefer a single string
+        if " " in self.claude_bin:
+            cmd = self.claude_bin + " " + " ".join(shlex.quote(a) for a in args)
+        else:
+            cmd = " ".join([self.claude_bin] + [shlex.quote(a) for a in args])
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
