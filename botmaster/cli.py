@@ -12,15 +12,43 @@ from .agent_runtime import AgentManager
 from .telegram_client import TelegramClient, TelegramConfig
 
 
-def _discover_projects(paths: list[Path]) -> dict[str, Path]:
+def _is_project_dir(p: Path) -> bool:
+    markers = [".git", "pyproject.toml", "package.json", "requirements.txt", "Cargo.toml", ".claude", ".claude-flow"]
+    try:
+        names = {c.name for c in p.iterdir()}
+    except Exception:
+        return False
+    for m in markers:
+        if m in names:
+            return True
+    return False
+
+
+def _discover_projects(paths: list[Path], max_depth: int = 3, max_results: int = 200) -> dict[str, Path]:
     result: dict[str, Path] = {}
+    count = 0
+    def visit(root: Path, depth: int):
+        nonlocal count
+        if count >= max_results or depth > max_depth:
+            return
+        try:
+            for entry in root.iterdir():
+                if count >= max_results:
+                    return
+                if not entry.is_dir():
+                    continue
+                if _is_project_dir(entry):
+                    key = entry.name.lower().replace(" ", "-")
+                    if key not in result:
+                        result[key] = entry
+                        count += 1
+                # Recurse further regardless, to catch nested projects
+                visit(entry, depth + 1)
+        except Exception:
+            return
     for base in paths:
-        if not base.exists():
-            continue
-        for p in base.iterdir():
-            if p.is_dir():
-                key = p.name.lower().replace(" ", "-")
-                result[key] = p
+        if base.exists():
+            visit(base, 0)
     return result
 
 
@@ -114,6 +142,7 @@ def daemon():
     manager = AgentManager(settings, storage, default_provider, on_assistant_message=push_agent_msg, provider_factory=provider_factory)
 
     projects = _discover_projects(settings.project_dirs)
+    project_slugs = sorted(projects.keys())
 
     # Start Telegram polling
     if not tg:
@@ -131,6 +160,30 @@ def daemon():
                 "\nHinweis: Standard-Provider ist Claude (headless, stream-json)."
             )
 
+        def _send_projects(page: int = 0, page_size: int = 10):
+            if not projects:
+                tg.send_message("Keine Projekte gefunden. Passe BM_PROJECT_DIRS an.")
+                return
+            start = page * page_size
+            end = min(start + page_size, len(project_slugs))
+            rows = []
+            row = []
+            for slug in project_slugs[start:end]:
+                row.append({"text": slug, "callback_data": f"proj:{slug}"})
+                if len(row) == 2:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            nav = []
+            if page > 0:
+                nav.append({"text": "◀️ Zurück", "callback_data": f"projpage:{page-1}"})
+            if end < len(project_slugs):
+                nav.append({"text": "Weiter ▶️", "callback_data": f"projpage:{page+1}"})
+            if nav:
+                rows.append(nav)
+            tg.send_message("Wähle ein Projekt:", reply_markup={"inline_keyboard": rows})
+
         def on_msg(text: str, raw: dict):
             # Commands: /new <project_key> <name...>, /agents, /stop <id>, /to <id> <text...>
             parts = text.strip().split()
@@ -139,6 +192,9 @@ def daemon():
             cmd = parts[0].lower()
             if cmd in ("/start", "/help"):
                 _send_help()
+                return
+            if cmd == "/projects":
+                _send_projects(0)
                 return
             if cmd == "/agents":
                 running = manager.list_agents()
@@ -163,13 +219,7 @@ def daemon():
                 )
                 return
             if cmd == "/new" and len(parts) == 1:
-                if not projects:
-                    tg.send_message("Keine Projekte gefunden. Passe BM_PROJECT_DIRS an.")
-                    return
-                lines = ["Wähle ein Projekt:"]
-                for k in sorted(projects.keys()):
-                    lines.append(f"/new {k}")
-                tg.send_message("\n".join(lines))
+                _send_projects(0)
                 return
             if cmd == "/stop" and len(parts) >= 2:
                 try:
@@ -196,7 +246,31 @@ def daemon():
             _send_help()
 
         if settings.enable_telegram_polling:
-            tg.start_polling(on_msg)
+            def on_callback(data: str, raw: dict, ack):
+                if data.startswith("projpage:"):
+                    try:
+                        page = int(data.split(":", 1)[1])
+                    except Exception:
+                        page = 0
+                    _send_projects(page)
+                    ack()
+                    return
+                if data.startswith("proj:"):
+                    slug = data.split(":", 1)[1]
+                    project_path = str(projects.get(slug)) if slug in projects else None
+                    try:
+                        spec = manager.spawn(name=f"agent-{slug}", project_path=project_path)
+                    except Exception as e:
+                        tg.send_message(f"Start fehlgeschlagen: {e}")
+                        ack()
+                        return
+                    tg.send_message(
+                        f"Agent #{spec.id} gestartet für Projekt {slug}.\n"+
+                        f"Nutze '/to {spec.id} <text>' für Nachrichten."
+                    )
+                    ack()
+
+            tg.start_polling(on_msg, on_callback=on_callback)
             tg.send_message("botMaster Daemon gestartet. Antworten werden hier gespiegelt.")
             _send_help()
 

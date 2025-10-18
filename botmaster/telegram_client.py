@@ -35,7 +35,7 @@ class TelegramClient:
         r = requests.post(url, json=payload, timeout=30)
         r.raise_for_status()
 
-    def start_polling(self, on_message: Callable[[str, dict], None], poll_interval: float = 1.5) -> None:
+    def start_polling(self, on_message: Callable[[str, dict], None], poll_interval: float = 1.5, on_callback: Optional[Callable[[str, dict, Callable[[], None]], None]] = None) -> None:
         if self._thread and self._thread.is_alive():
             return
 
@@ -45,6 +45,20 @@ class TelegramClient:
                     updates = self._get_updates()
                     for upd in updates:
                         self._offset = max(self._offset, upd.get("update_id", 0) + 1)
+                        # Handle callback queries (inline keyboard)
+                        if on_callback and upd.get("callback_query"):
+                            cq = upd["callback_query"]
+                            data = cq.get("data", "")
+                            chat_id = cq.get("message", {}).get("chat", {}).get("id")
+                            if str(chat_id) == str(self.cfg.chat_id):
+                                def ack():
+                                    try:
+                                        self._answer_callback_query(cq.get("id"))
+                                    except Exception:
+                                        pass
+                                on_callback(data, cq, ack)
+                            continue
+
                         msg = upd.get("message") or upd.get("edited_message")
                         if msg and str(msg.get("chat", {}).get("id")) == str(self.cfg.chat_id):
                             text = msg.get("text", "")
@@ -70,3 +84,8 @@ class TelegramClient:
         r.raise_for_status()
         data = r.json()
         return data.get("result", [])
+
+    def _answer_callback_query(self, callback_query_id: str):
+        url = f"{self.base}/answerCallbackQuery"
+        r = requests.post(url, json={"callback_query_id": callback_query_id}, timeout=15)
+        r.raise_for_status()
