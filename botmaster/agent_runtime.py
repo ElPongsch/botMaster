@@ -23,7 +23,7 @@ class AgentSpec:
 
 
 class AgentWorker(threading.Thread):
-    def __init__(self, spec: AgentSpec, settings: Settings, storage: Storage, provider: LLMProvider):
+    def __init__(self, spec: AgentSpec, settings: Settings, storage: Storage, provider: LLMProvider, on_assistant_message=None):
         super().__init__(name=f"agent-{spec.id}", daemon=True)
         self.spec = spec
         self.settings = settings
@@ -31,6 +31,7 @@ class AgentWorker(threading.Thread):
         self.provider = provider
         self.inbox: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
+        self._on_assistant_message = on_assistant_message
 
     def stop(self):
         self._stop.set()
@@ -59,21 +60,27 @@ class AgentWorker(threading.Thread):
                 reply = self.provider.generate(self.settings.system_prompt, msgs, model=self.spec.model)
             except Exception as e:
                 reply = f"[Fehler bei LLM-Abfrage: {e}]"
-            self.storage.add_message(self.spec.session_id, "assistant", reply)
+            msg_id = self.storage.add_message(self.spec.session_id, "assistant", reply)
+            if self._on_assistant_message:
+                try:
+                    self._on_assistant_message(self.spec, reply)
+                except Exception:
+                    pass
 
 
 class AgentManager:
-    def __init__(self, settings: Settings, storage: Storage, provider: LLMProvider):
+    def __init__(self, settings: Settings, storage: Storage, provider: LLMProvider, on_assistant_message=None):
         self.settings = settings
         self.storage = storage
         self.provider = provider
         self._agents: dict[int, AgentWorker] = {}
+        self._on_assistant_message = on_assistant_message
 
     def spawn(self, name: str, project_path: Optional[str] = None, model: Optional[str] = None) -> AgentSpec:
         agent_id = self.storage.create_agent(name=name, provider=self.provider.__class__.__name__, model=model, project_path=project_path)
         session_id = self.storage.create_session(agent_id, title=f"Session {name}")
         spec = AgentSpec(id=agent_id, name=name, provider_name=self.provider.__class__.__name__, model=model, project_path=project_path, session_id=session_id)
-        worker = AgentWorker(spec, self.settings, self.storage, self.provider)
+        worker = AgentWorker(spec, self.settings, self.storage, self.provider, on_assistant_message=self._on_assistant_message)
         worker.start()
         self._agents[agent_id] = worker
         return spec
@@ -95,4 +102,3 @@ class AgentManager:
 
     def list_agents(self) -> List[int]:
         return list(self._agents.keys())
-

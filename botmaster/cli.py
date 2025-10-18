@@ -48,16 +48,28 @@ def daemon():
         provider_cmd=settings.provider_cmd,
         provider_timeout_sec=settings.provider_timeout_sec,
     )
-    manager = AgentManager(settings, storage, provider)
+    # Telegram client (optional)
+    tg = None
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        tg = TelegramClient(TelegramConfig(settings.telegram_bot_token, settings.telegram_chat_id))
+
+    def push_agent_msg(spec, text: str):
+        if not tg:
+            return
+        header = f"Agent #{spec.id} {spec.name}"
+        project = f"Projekt: {spec.project_path or '-'}"
+        body = text
+        # keep formatting simple/plain to avoid Telegram markdown issues
+        tg.send_message(f"{header}\n{project}\n\n{body}")
+
+    manager = AgentManager(settings, storage, provider, on_assistant_message=push_agent_msg)
 
     projects = _discover_projects(settings.project_dirs)
 
     # Start Telegram polling
-    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+    if not tg:
         print("WARN: Telegram nicht konfiguriert (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)")
-        tg = None
     else:
-        tg = TelegramClient(TelegramConfig(settings.telegram_bot_token, settings.telegram_chat_id))
 
         def on_msg(text: str, raw: dict):
             # Commands: /new <project_key> <name...>, /agents, /stop <id>, /to <id> <text...>
@@ -79,6 +91,15 @@ def daemon():
                 project_path = str(projects.get(proj_key)) if proj_key in projects else None
                 spec = manager.spawn(name=name, project_path=project_path)
                 tg.send_message(f"Agent #{spec.id} '{name}' gestartet. Projekt: {project_path or '-'}\nSende mit '/to {spec.id} ...' Nachrichten.")
+                return
+            if cmd == "/new" and len(parts) == 1:
+                if not projects:
+                    tg.send_message("Keine Projekte gefunden. Passe BM_PROJECT_DIRS an.")
+                    return
+                lines = ["Wähle ein Projekt:"]
+                for k in sorted(projects.keys()):
+                    lines.append(f"/new {k}")
+                tg.send_message("\n".join(lines))
                 return
             if cmd == "/stop" and len(parts) >= 2:
                 try:
@@ -102,11 +123,11 @@ def daemon():
                     tg.send_message(f"(an #{aid}) OK")
                 return
             # fallback: help
-            tg.send_message("Befehle: /new <project_key> [name], /agents, /stop <id>, /to <id> <text>")
+            tg.send_message("Befehle: /new [project_key] [name], /agents, /stop <id>, /to <id> <text>")
 
         if settings.enable_telegram_polling:
             tg.start_polling(on_msg)
-            tg.send_message("botMaster Daemon gestartet. /agents /new /stop /to verfügbar.")
+            tg.send_message("botMaster Daemon gestartet. /agents /new /stop /to verfügbar. Antworten werden hier gespiegelt.")
 
     # Keep the daemon alive
     try:

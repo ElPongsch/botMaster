@@ -23,13 +23,15 @@ class TelegramClient:
         self._thread: Optional[threading.Thread] = None
         self._offset = 0
 
-    def send_message(self, text: str) -> None:
+    def send_message(self, text: str, reply_markup: dict | None = None) -> None:
         url = f"{self.base}/sendMessage"
         payload = {
             "chat_id": self.cfg.chat_id,
             "text": text,
             "disable_web_page_preview": True,
         }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         r = requests.post(url, json=payload, timeout=30)
         r.raise_for_status()
 
@@ -68,4 +70,3 @@ class TelegramClient:
         r.raise_for_status()
         data = r.json()
         return data.get("result", [])
-
