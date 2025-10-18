@@ -39,15 +39,6 @@ def send_cli():
 def daemon():
     settings = load_settings()
     storage = Storage(settings.db_url)
-    provider = make_provider(
-        settings.default_provider,
-        settings.anthropic_api_key,
-        settings.openai_api_key,
-        settings.gemini_api_key,
-        settings.default_model,
-        provider_cmd=settings.provider_cmd,
-        provider_timeout_sec=settings.provider_timeout_sec,
-    )
     # Telegram client (optional)
     tg = None
     if settings.telegram_bot_token and settings.telegram_chat_id:
@@ -62,7 +53,29 @@ def daemon():
         # keep formatting simple/plain to avoid Telegram markdown issues
         tg.send_message(f"{header}\n{project}\n\n{body}")
 
-    manager = AgentManager(settings, storage, provider, on_assistant_message=push_agent_msg)
+    # Provider factory: per-agent customization for claude-cli
+    def provider_factory(name: str, project_path: str | None, model: str | None):
+        # For claude-cli we pass cwd=project_path and optional instructions
+        return make_provider(
+            settings.default_provider,
+            settings.anthropic_api_key,
+            settings.openai_api_key,
+            settings.gemini_api_key,
+            settings.default_model,
+            provider_cmd=settings.provider_cmd,
+            provider_timeout_sec=settings.provider_timeout_sec,
+            claude_cli_bin=settings.claude_cli_bin,
+            mcp_config_path=settings.mcp_config_path,
+            cwd=project_path,
+            instructions=(Path(settings.agent_instructions_path).read_text(encoding='utf-8') if settings.agent_instructions_path and Path(settings.agent_instructions_path).exists() else None),
+        )
+
+    # Default provider instance for non-claude-cli modes (used when factory not needed)
+    default_provider = None
+    if settings.default_provider.lower() not in ("claude-cli", "claude-flow"):
+        default_provider = provider_factory(name="default", project_path=None, model=None)
+
+    manager = AgentManager(settings, storage, default_provider, on_assistant_message=push_agent_msg, provider_factory=provider_factory)
 
     projects = _discover_projects(settings.project_dirs)
 

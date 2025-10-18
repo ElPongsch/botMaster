@@ -69,18 +69,22 @@ class AgentWorker(threading.Thread):
 
 
 class AgentManager:
-    def __init__(self, settings: Settings, storage: Storage, provider: LLMProvider, on_assistant_message=None):
+    def __init__(self, settings: Settings, storage: Storage, provider: LLMProvider | None = None, on_assistant_message=None, provider_factory=None):
         self.settings = settings
         self.storage = storage
         self.provider = provider
         self._agents: dict[int, AgentWorker] = {}
         self._on_assistant_message = on_assistant_message
+        self._provider_factory = provider_factory
 
     def spawn(self, name: str, project_path: Optional[str] = None, model: Optional[str] = None) -> AgentSpec:
-        agent_id = self.storage.create_agent(name=name, provider=self.provider.__class__.__name__, model=model, project_path=project_path)
+        prov = self.provider
+        if self._provider_factory:
+            prov = self._provider_factory(name=name, project_path=project_path, model=model)
+        agent_id = self.storage.create_agent(name=name, provider=prov.__class__.__name__, model=model, project_path=project_path)
         session_id = self.storage.create_session(agent_id, title=f"Session {name}")
-        spec = AgentSpec(id=agent_id, name=name, provider_name=self.provider.__class__.__name__, model=model, project_path=project_path, session_id=session_id)
-        worker = AgentWorker(spec, self.settings, self.storage, self.provider, on_assistant_message=self._on_assistant_message)
+        spec = AgentSpec(id=agent_id, name=name, provider_name=prov.__class__.__name__, model=model, project_path=project_path, session_id=session_id)
+        worker = AgentWorker(spec, self.settings, self.storage, prov, on_assistant_message=self._on_assistant_message)
         worker.start()
         self._agents[agent_id] = worker
         return spec

@@ -23,6 +23,9 @@ class Settings:
     default_model: str | None
     provider_cmd: str | None
     provider_timeout_sec: int
+    claude_cli_bin: str
+    mcp_config_path: str | None
+    agent_instructions_path: str | None
 
     # Storage
     data_dir: Path
@@ -64,6 +67,9 @@ def load_settings() -> Settings:
         default_model=os.getenv("BM_DEFAULT_MODEL"),
         provider_cmd=os.getenv("BM_PROVIDER_CMD"),
         provider_timeout_sec=int(os.getenv("BM_PROVIDER_TIMEOUT", "90")),
+        claude_cli_bin=os.getenv("BM_CLAUDE_CLI_BIN", "claude"),
+        mcp_config_path=os.getenv("BM_MCP_CONFIG_PATH"),
+        agent_instructions_path=os.getenv("BM_AGENT_INSTRUCTIONS_PATH"),
         data_dir=data_dir,
         db_url=db_url,
         project_dirs=project_dirs,
