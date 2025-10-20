@@ -9,6 +9,8 @@ import shlex
 import sys
 import threading
 import time
+import queue
+import uuid
 
 
 class LLMProvider:
@@ -170,17 +172,23 @@ class ClaudeCLIStreamProvider(LLMProvider):
     - Optionally prepends instructions on first message by sending a combined user content.
     """
 
-    def __init__(self, claude_bin: str = "claude", mcp_config_path: Optional[str] = None, cwd: Optional[str] = None, instructions: Optional[str] = None, session_id: Optional[str] = None):
+    def __init__(self, claude_bin: str = "claude", mcp_config_path: Optional[str] = None, cwd: Optional[str] = None, instructions: Optional[str] = None, session_id: Optional[str] = None, response_timeout: float = 120.0):
         # claude_bin may be a full command string, e.g. "wsl -e claude"
         self.claude_bin = claude_bin
         self.mcp_config_path = mcp_config_path
         self.cwd = cwd
         self.instructions = instructions
+        self.response_timeout = response_timeout
         self._proc: Optional[subprocess.Popen] = None
-        self._buf_lock = threading.Lock()
+        self._reader_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
         self._started = False
         self._first_message_sent = False
-        self._session_id = session_id or str(int(time.time()*1000))
+        self._session_id = session_id or str(uuid.uuid4())
+        self._queue: "queue.Queue[str]" = queue.Queue()
+        self._lock = threading.Lock()
+        self._last_error: Optional[str] = None
+        self._ready_event = threading.Event()
 
     def _ensure_started(self):
         if self._started and self._proc and self._proc.poll() is None:
@@ -208,8 +216,88 @@ class ClaudeCLIStreamProvider(LLMProvider):
             stderr=subprocess.PIPE,
             cwd=self.cwd or None,
             shell=True,
+            bufsize=0,
         )
         self._started = True
+        self._reader_thread = threading.Thread(target=self._reader, name="claude-cli-reader", daemon=True)
+        self._reader_thread.start()
+        self._stderr_thread = threading.Thread(target=self._stderr_reader, name="claude-cli-stderr", daemon=True)
+        self._stderr_thread.start()
+
+    def _reader(self):
+        while True:
+            if not self._proc:
+                break
+            try:
+                line = self._proc.stdout.readline()
+            except Exception:
+                break
+            if not line:
+                if self._proc.poll() is not None:
+                    break
+                time.sleep(0.05)
+                continue
+            try:
+                text_line = line.decode("utf-8", errors="ignore").strip()
+            except Exception:
+                continue
+            if not text_line:
+                continue
+            try:
+                msg = json.loads(text_line)
+            except Exception:
+                continue
+            typ = msg.get("type") or msg.get("message", {}).get("role")
+            if typ == "system" and msg.get("subtype") == "init":
+                self._ready_event.set()
+            if typ in ("assistant", "assistant_message"):
+                content = msg.get("message", {}).get("content") or msg.get("content") or ""
+                text = self._content_to_text(content)
+                if text:
+                    self._queue.put(text)
+            elif typ == "assistant_delta":
+                delta = msg.get("delta") or msg.get("message", {}).get("delta") or {}
+                text = self._content_to_text(delta.get("content"))
+                if text:
+                    self._queue.put(text)
+            elif typ == "error":
+                self._last_error = str(msg.get("error") or msg)
+                self._queue.put(f"[claude-cli error] {self._last_error}")
+
+    def _stderr_reader(self):
+        while True:
+            if not self._proc:
+                break
+            try:
+                line = self._proc.stderr.readline()
+            except Exception:
+                break
+            if not line:
+                if self._proc.poll() is not None:
+                    break
+                time.sleep(0.05)
+                continue
+            text = line.decode("utf-8", errors="ignore").strip()
+            if text:
+                self._last_error = text
+
+    def _content_to_text(self, content) -> str:
+        if not content:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    if block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+            return "".join(parts)
+        if isinstance(content, dict) and content.get("type") == "text":
+            return content.get("text", "")
+        return str(content)
 
     def generate(self, system_prompt: str, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.2) -> str:
         self._ensure_started()
@@ -233,39 +321,50 @@ class ClaudeCLIStreamProvider(LLMProvider):
             "message": {"role": "user", "content": content},
             "session_id": self._session_id,
         }
-        line = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
-        self._proc.stdin.write(line)
-        self._proc.stdin.flush()
-
-        # Read lines until we get an assistant message or timeout
-        start = time.time()
-        timeout = 90.0
-        text_parts: List[str] = []
-        while time.time() - start < timeout:
-            line = self._proc.stdout.readline()
-            if not line:
-                time.sleep(0.05)
-                continue
-            s = line.decode("utf-8", errors="ignore").strip()
-            if not s:
-                continue
-            try:
-                msg = json.loads(s)
-            except Exception:
-                continue
-            typ = msg.get("type") or msg.get("message", {}).get("role")
-            if typ in ("assistant",):
-                content = msg.get("message", {}).get("content") or msg.get("content") or ""
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                elif isinstance(content, str):
-                    text_parts.append(content)
-                # We keep reading to accumulate chunks for a short period, then break
-                if time.time() - start > 2.0:
+        payload = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
+        if not self._ready_event.wait(timeout=30):
+            return "[claude-cli not ready]"
+        with self._lock:
+            # Flush queue before sending new message
+            while not self._queue.empty():
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
                     break
-        return "".join(text_parts) or ""
+            try:
+                self._proc.stdin.write(payload)
+                self._proc.stdin.flush()
+            except Exception as exc:
+                return f"[claude-cli write error] {exc}"
+
+        parts: List[str] = []
+        deadline = time.time() + self.response_timeout
+        while time.time() < deadline:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            try:
+                chunk = self._queue.get(timeout=min(remaining, 5.0))
+            except queue.Empty:
+                continue
+            parts.append(chunk)
+            # Gather additional chunks briefly for smoother output
+            gather_deadline = time.time() + 0.5
+            while time.time() < gather_deadline:
+                try:
+                    more = self._queue.get(timeout=0.1)
+                    parts.append(more)
+                except queue.Empty:
+                    break
+            break
+
+        if parts:
+            return "".join(parts)
+        if self._last_error:
+            return f"[claude-cli stderr] {self._last_error}"
+        if self._proc and self._proc.poll() is not None:
+            return f"[claude-cli exited {self._proc.returncode}]"
+        return "[claude-cli timeout]"
 
 
 def make_provider(name: str, anthropic_key: Optional[str], openai_key: Optional[str], gemini_key: Optional[str], default_model: Optional[str] = None, provider_cmd: Optional[str] = None, provider_timeout_sec: int = 90, *, claude_cli_bin: Optional[str] = None, mcp_config_path: Optional[str] = None, cwd: Optional[str] = None, instructions: Optional[str] = None) -> LLMProvider:
