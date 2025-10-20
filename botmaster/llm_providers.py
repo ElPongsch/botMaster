@@ -194,29 +194,30 @@ class ClaudeCLIStreamProvider(LLMProvider):
         if self._started and self._proc and self._proc.poll() is None:
             return
         args = [
+            self.claude_bin,
             "-p",
             "--verbose",
-            "--output-format", "stream-json",
-            "--input-format", "stream-json",
-            "--replay-user-messages",
-            "--session-id", self._session_id,
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--session-id",
+            self._session_id,
             "--dangerously-skip-permissions",
         ]
         if self.mcp_config_path:
             args += ["--mcp-config", self.mcp_config_path]
-        # Build command; with shell=True prefer a single string
-        if " " in self.claude_bin:
-            cmd = self.claude_bin + " " + " ".join(shlex.quote(a) for a in args)
-        else:
-            cmd = " ".join([self.claude_bin] + [shlex.quote(a) for a in args])
+
+        parts = args
+        command = " ".join(shlex.quote(p) for p in parts)
+
         self._proc = subprocess.Popen(
-            cmd,
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=self.cwd or None,
             shell=True,
-            bufsize=0,
         )
         self._started = True
         self._reader_thread = threading.Thread(target=self._reader, name="claude-cli-reader", daemon=True)
@@ -237,10 +238,7 @@ class ClaudeCLIStreamProvider(LLMProvider):
                     break
                 time.sleep(0.05)
                 continue
-            try:
-                text_line = line.decode("utf-8", errors="ignore").strip()
-            except Exception:
-                continue
+            text_line = line.decode("utf-8", errors="ignore").strip()
             if not text_line:
                 continue
             try:
@@ -322,8 +320,6 @@ class ClaudeCLIStreamProvider(LLMProvider):
             "session_id": self._session_id,
         }
         payload = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
-        if not self._ready_event.wait(timeout=30):
-            return "[claude-cli not ready]"
         with self._lock:
             # Flush queue before sending new message
             while not self._queue.empty():
