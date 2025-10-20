@@ -2,6 +2,7 @@ import subprocess
 import json
 import time
 import uuid
+import sys
 from pathlib import Path
 
 
@@ -11,8 +12,13 @@ INSTRUCTIONS = PROJECT_PATH / "agent-instructions" / "task-agent-v2.md"
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     session_id = str(uuid.uuid4())
-    instructions_text = INSTRUCTIONS.read_text(encoding="utf-8") if INSTRUCTIONS.exists() else ""
+    instructions_text = ""
+    if INSTRUCTIONS.exists():
+        instructions_text = INSTRUCTIONS.read_text(encoding="utf-8", errors="ignore")
+
     payload = {
         "type": "user",
         "message": {
@@ -28,6 +34,7 @@ def main():
         "stream-json",
         "--input-format",
         "stream-json",
+        "--verbose",
         "--replay-user-messages",
         "--session-id",
         session_id,
@@ -42,13 +49,12 @@ def main():
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
         cwd=PROJECT_PATH,
         shell=True,
     )
 
     try:
-        proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        proc.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
         proc.stdin.flush()
     except Exception as exc:
         print("Fehler beim Schreiben auf stdin:", exc)
@@ -61,7 +67,7 @@ def main():
             if not line:
                 time.sleep(0.2)
                 continue
-            line = line.strip()
+            line = line.decode("utf-8", errors="ignore").strip()
             if not line:
                 continue
             try:
@@ -79,7 +85,7 @@ def main():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
-    stderr = proc.stderr.read()
+    stderr = proc.stderr.read().decode("utf-8", errors="ignore")
     if stderr:
         print("==> stderr:")
         print(stderr)
@@ -87,4 +93,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
