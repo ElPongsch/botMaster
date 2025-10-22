@@ -163,15 +163,17 @@ def daemon():
     else:
 
         def _send_help():
-            tg.send_message(
-                "botMaster Hilfe\n"+
-                "/help – diese Hilfe\n"+
-                "/agents – aktive und bekannte Agenten\n"+
-                "/new [project_key] [name] – neuen Agenten starten\n"+
-                "/to <id> <text> – Nachricht an Agent\n"+
-                "/stop <id> – Agent stoppen\n"+
-                "\nHinweis: Standard-Provider ist Claude (headless, stream-json)."
+            message = (
+                "botMaster Hilfe\n"
+                "/help - diese Hilfe\n"
+                "/agents - aktive und bekannte Agenten\n"
+                "/projects - Projekte durchsuchen und Agent starten\n"
+                "/new [project_key] [name] - Agent sofort starten\n"
+                "/to <id> <text> - Nachricht an Agent\n"
+                "/stop <id> - Agent stoppen\n"
+                "\nNachrichten ohne '/' gehen direkt an den BotMaster-Basisagenten."
             )
+            tg.send_message(message)
 
         def _send_projects(page: int = 0, page_size: int = 10):
             if not projects:
@@ -222,8 +224,7 @@ def daemon():
                     lines = ["Aktive Agent-IDs: " + (", ".join(map(str, running)) or '-')]
                     for a in listing[:10]:
                         lines.append(f"#{a['id']} {a['name']} [{a['status']}] -> {a.get('project_path') or '-'}")
-                    tg.send_message("
-".join(lines))
+                    tg.send_message("\n".join(lines))
                     return
 
                 if cmd == '/new':
@@ -239,8 +240,7 @@ def daemon():
                         tg.send_message(f"Fehler beim Start: {e}")
                         return
                     tg.send_message(
-                        f"Agent #{spec.id} '{name}' gestartet. Projekt: {project_path or '-'}
-"
+                        f"Agent #{spec.id} '{name}' gestartet. Projekt: {project_path or '-'}\n"
                         f"Nutze '/to {spec.id} <text>' für Nachrichten."
                     )
                     return
@@ -297,8 +297,7 @@ def daemon():
                         tg.send_message(f"Start fehlgeschlagen: {e}")
                     else:
                         tg.send_message(
-                            f"Agent #{spec.id} gestartet für Projekt {slug}.
-"
+                            f"Agent #{spec.id} gestartet für Projekt {slug}.\n"
                             f"Nutze '/to {spec.id} <text>' für Nachrichten."
                         )
                     handled = True
@@ -312,6 +311,7 @@ def daemon():
             tg.start_polling(on_msg, on_callback=on_callback)
             tg.send_message("botMaster Daemon gestartet. Antworten werden hier gespiegelt.")
             _send_help()
+            get_base_agent()
 
     # Keep the daemon alive
     try:
