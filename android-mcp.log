@@ -1,0 +1,5 @@
+[2025-10-22T17:10:29.387Z] [INFO] Logger initialized - Log file: C:\myFolder\Port\myTools\botMaster\android-mcp.log
+[2025-10-22T17:10:29.625Z] [INFO] Android MCP Server initialized
+[2025-10-22T17:10:29.625Z] [INFO] Starting Android MCP Server...
+[2025-10-22T17:10:29.628Z] [INFO] Android MCP Server running on stdio
+[2025-10-22T17:10:29.661Z] [DEBUG] ListTools request received
