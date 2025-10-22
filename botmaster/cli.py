@@ -9,7 +9,7 @@ from pathlib import Path
 from .config import load_settings
 from .storage import Storage
 from .llm_providers import make_provider
-from .agent_runtime import AgentManager
+from .agent_runtime import AgentManager, AgentSpec
 from .telegram_client import TelegramClient, TelegramConfig
 
 
@@ -141,6 +141,18 @@ def daemon():
         default_provider = provider_factory(name="default", project_path=None, model=None)
 
     manager = AgentManager(settings, storage, default_provider, on_assistant_message=push_agent_msg, provider_factory=provider_factory)
+
+    base_agent: AgentSpec | None = None
+
+    def get_base_agent() -> AgentSpec:
+        nonlocal base_agent
+        if base_agent is None:
+            base_agent = manager.spawn(name="botmaster-core", project_path=None)
+            if tg:
+                tg.send_message(
+                    f"Basis-Agent #{base_agent.id} gestartet. Nachrichten ohne '/' gehen automatisch an ihn."
+                )
+        return base_agent
 
     projects = _discover_projects(settings.project_dirs)
     project_slugs = sorted(projects.keys())
