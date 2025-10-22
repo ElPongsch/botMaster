@@ -198,90 +198,116 @@ def daemon():
             tg.send_message("Wähle ein Projekt:", reply_markup={"inline_keyboard": rows})
 
         def on_msg(text: str, raw: dict):
-            # Commands: /new <project_key> <name...>, /agents, /stop <id>, /to <id> <text...>
-            parts = text.strip().split()
-            if not parts:
+            if not text:
                 return
-            cmd = parts[0].lower()
-            if cmd in ("/start", "/help"):
-                _send_help()
+            stripped = text.strip()
+            if not stripped:
                 return
-            if cmd == "/projects":
-                _send_projects(0)
-                return
-            if cmd == "/agents":
-                running = manager.list_agents()
-                listing = storage.list_agents()
-                lines = ["Aktive Agent-IDs: " + (", ".join(map(str, running)) or "-")]
-                for a in listing[:10]:
-                    lines.append(f"#{a['id']} {a['name']} [{a['status']}] -> {a.get('project_path') or '-'}")
-                tg.send_message("\n".join(lines))
-                return
-            if cmd == "/new" and len(parts) >= 2:
-                proj_key = parts[1].lower()
-                name = " ".join(parts[2:]) if len(parts) > 2 else f"agent-{proj_key}"
-                project_path = str(projects.get(proj_key)) if proj_key in projects else None
-                try:
-                    spec = manager.spawn(name=name, project_path=project_path)
-                except Exception as e:
-                    tg.send_message(f"Fehler beim Start: {e}")
+
+            if stripped.startswith('/'):
+                parts = stripped.split()
+                cmd = parts[0].lower()
+
+                if cmd in ('/start', '/help'):
+                    _send_help()
                     return
-                tg.send_message(
-                    f"Agent #{spec.id} '{name}' gestartet. Projekt: {project_path or '-'}\n"+
-                    f"Nutze '/to {spec.id} <text>' für Nachrichten."
-                )
-                return
-            if cmd == "/new" and len(parts) == 1:
-                _send_projects(0)
-                return
-            if cmd == "/stop" and len(parts) >= 2:
-                try:
-                    aid = int(parts[1])
-                except ValueError:
-                    tg.send_message("Ungültige Agent-ID")
+
+                if cmd == '/projects':
+                    _send_projects(0)
                     return
-                ok = manager.stop(aid)
-                tg.send_message(f"Agent #{aid} {'gestoppt' if ok else 'nicht gefunden'}.")
-                return
-            if cmd == "/to" and len(parts) >= 3:
-                try:
-                    aid = int(parts[1])
-                except ValueError:
-                    tg.send_message("Ungültige Agent-ID")
+
+                if cmd == '/agents':
+                    running = manager.list_agents()
+                    listing = storage.list_agents()
+                    lines = ["Aktive Agent-IDs: " + (", ".join(map(str, running)) or '-')]
+                    for a in listing[:10]:
+                        lines.append(f"#{a['id']} {a['name']} [{a['status']}] -> {a.get('project_path') or '-'}")
+                    tg.send_message("
+".join(lines))
                     return
-                msg = " ".join(parts[2:])
-                if not manager.submit(aid, msg):
-                    tg.send_message("Agent nicht gefunden.")
-                else:
-                    tg.send_message(f"(an #{aid}) OK")
+
+                if cmd == '/new':
+                    if len(parts) == 1:
+                        _send_projects(0)
+                        return
+                    proj_key = parts[1].lower()
+                    name = " ".join(parts[2:]) if len(parts) > 2 else f"agent-{proj_key}"
+                    project_path = str(projects.get(proj_key)) if proj_key in projects else None
+                    try:
+                        spec = manager.spawn(name=name, project_path=project_path)
+                    except Exception as e:
+                        tg.send_message(f"Fehler beim Start: {e}")
+                        return
+                    tg.send_message(
+                        f"Agent #{spec.id} '{name}' gestartet. Projekt: {project_path or '-'}
+"
+                        f"Nutze '/to {spec.id} <text>' für Nachrichten."
+                    )
+                    return
+
+                if cmd == '/stop' and len(parts) >= 2:
+                    try:
+                        aid = int(parts[1])
+                    except ValueError:
+                        tg.send_message('Ungültige Agent-ID')
+                        return
+                    ok = manager.stop(aid)
+                    tg.send_message(f"Agent #{aid} {'gestoppt' if ok else 'nicht gefunden'}.")
+                    return
+
+                if cmd == '/to' and len(parts) >= 3:
+                    try:
+                        aid = int(parts[1])
+                    except ValueError:
+                        tg.send_message('Ungültige Agent-ID')
+                        return
+                    msg = " ".join(parts[2:])
+                    if not manager.submit(aid, msg):
+                        tg.send_message('Agent nicht gefunden.')
+                    else:
+                        tg.send_message(f"(an #{aid}) OK")
+                    return
+
+                tg.send_message('Unbekannter Befehl. /help für Übersicht.')
                 return
-            # fallback: help
-            _send_help()
+
+            spec = get_base_agent()
+            if not manager.submit(spec.id, text):
+                tg.send_message('Basis-Agent nicht verfügbar.')
+            else:
+                tg.send_message(f"(an #{spec.id}) -> gesendet")
+
 
         if settings.enable_telegram_polling:
             def on_callback(data: str, raw: dict, ack):
-                if data.startswith("projpage:"):
+                handled = False
+                if data.startswith('projpage:'):
                     try:
-                        page = int(data.split(":", 1)[1])
+                        page = int(data.split(':', 1)[1])
                     except Exception:
                         page = 0
                     _send_projects(page)
-                    ack()
-                    return
-                if data.startswith("proj:"):
-                    slug = data.split(":", 1)[1]
+                    handled = True
+                elif data.startswith('proj:'):
+                    slug = data.split(':', 1)[1]
                     project_path = str(projects.get(slug)) if slug in projects else None
                     try:
-                        spec = manager.spawn(name=f"agent-{slug}", project_path=project_path)
+                        spec = manager.spawn(name=f'agent-{slug}', project_path=project_path)
                     except Exception as e:
                         tg.send_message(f"Start fehlgeschlagen: {e}")
-                        ack()
-                        return
-                    tg.send_message(
-                        f"Agent #{spec.id} gestartet für Projekt {slug}.\n"+
-                        f"Nutze '/to {spec.id} <text>' für Nachrichten."
-                    )
-                    ack()
+                    else:
+                        tg.send_message(
+                            f"Agent #{spec.id} gestartet für Projekt {slug}.
+"
+                            f"Nutze '/to {spec.id} <text>' für Nachrichten."
+                        )
+                    handled = True
+
+                ack()
+                if not handled and data:
+                    tg.send_message('Unbekannte Auswahl.')
+
+
 
             tg.start_polling(on_msg, on_callback=on_callback)
             tg.send_message("botMaster Daemon gestartet. Antworten werden hier gespiegelt.")
