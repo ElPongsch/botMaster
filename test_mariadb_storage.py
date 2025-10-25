@@ -82,7 +82,7 @@ def test_storage():
     try:
         msg_id = storage.send_message(
             from_agent=session_id,
-            to_agent="orchestrator",
+            to_agent=session_id,  # Send to self for testing
             message="Test message from agent",
             message_type="notification",
             context_data={"test": True}
@@ -94,7 +94,7 @@ def test_storage():
     # Test 6: Get pending messages
     print("\n[TEST] Getting pending messages...")
     try:
-        messages = storage.get_pending_messages("orchestrator")
+        messages = storage.get_pending_messages(session_id)
         print(f"[OK] Found {len(messages)} pending message(s)")
         for msg in messages:
             print(f"   - From {msg['from_agent']}: {msg['message'][:50]}...")
