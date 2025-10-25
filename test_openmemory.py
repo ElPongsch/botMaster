@@ -1,6 +1,5 @@
 """Test OpenMemory SSE connection"""
 import requests
-import json
 
 OPENMEMORY_URL = "http://localhost:8765"
 USER_ID = "markus"
@@ -14,7 +13,7 @@ def test_health():
         print(f"   Response: {r.text}")
         return r.status_code == 200
     except Exception as e:
-        print(f"❌ Health check failed: {e}")
+        print(f"[FAIL] Health check failed: {e}")
         return False
 
 def test_add_memory():
@@ -32,11 +31,11 @@ def test_add_memory():
             json=data,
             timeout=10
         )
-        print(f"✅ Add memory: {r.status_code}")
+        print(f"[OK] Add memory: {r.status_code}")
         print(f"   Response: {r.json()}")
         return r.status_code in (200, 201)
     except Exception as e:
-        print(f"❌ Add memory failed: {e}")
+        print(f"[FAIL] Add memory failed: {e}")
         return False
 
 def test_search_memory():
@@ -47,16 +46,16 @@ def test_search_memory():
             "user_id": USER_ID
         }
         r = requests.get(f"{OPENMEMORY_URL}/v1/memories/search", params=params, timeout=10)
-        print(f"✅ Search memory: {r.status_code}")
+        print(f"[OK] Search memory: {r.status_code}")
         results = r.json()
         print(f"   Found {len(results.get('results', []))} memories")
         return r.status_code == 200
     except Exception as e:
-        print(f"❌ Search memory failed: {e}")
+        print(f"[FAIL] Search memory failed: {e}")
         return False
 
 if __name__ == "__main__":
-    print("🔍 Testing OpenMemory Connection...\n")
+    print("Testing OpenMemory Connection...\n")
 
     health_ok = test_health()
     print()
@@ -70,10 +69,10 @@ if __name__ == "__main__":
             print()
 
             if search_ok:
-                print("✅ OpenMemory Connection WORKING!")
+                print("[SUCCESS] OpenMemory Connection WORKING!")
             else:
-                print("⚠️ Search failed but API is responding")
+                print("[WARN] Search failed but API is responding")
         else:
-            print("⚠️ Add memory failed but API is responding")
+            print("[WARN] Add memory failed but API is responding")
     else:
-        print("❌ OpenMemory API not responding - check Docker containers")
+        print("[FAIL] OpenMemory API not responding - check Docker containers")
