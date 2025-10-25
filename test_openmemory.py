@@ -1,78 +1,75 @@
-"""Test OpenMemory SSE connection"""
+"""Test OpenMemory API connection"""
 import requests
 
 OPENMEMORY_URL = "http://localhost:8765"
 USER_ID = "markus"
-API_KEY = "local-dev-key"
 
-def test_health():
-    """Test if OpenMemory API is responding"""
+def test_list_memories():
+    """Test listing memories for user"""
     try:
-        r = requests.get(f"{OPENMEMORY_URL}/health", timeout=5)
-        print(f"[OK] Health check: {r.status_code}")
-        print(f"   Response: {r.text}")
+        params = {"user_id": USER_ID}
+        r = requests.get(f"{OPENMEMORY_URL}/api/v1/memories/", params=params, timeout=5)
+        print(f"[OK] List memories: {r.status_code}")
+        data = r.json()
+        print(f"   Found {len(data.get('results', []))} memories")
         return r.status_code == 200
     except Exception as e:
-        print(f"[FAIL] Health check failed: {e}")
+        print(f"[FAIL] List memories failed: {e}")
         return False
 
 def test_add_memory():
-    """Test adding a memory via API"""
+    """Test adding a memory"""
     try:
-        headers = {"Content-Type": "application/json"}
         data = {
-            "messages": [{"role": "user", "content": "Test memory from botMaster v2.0"}],
-            "user_id": USER_ID,
-            "metadata": {"source": "botmaster_test"}
+            "messages": [
+                {"role": "user", "content": "OpenMemory test from botMaster v2.0 - Agent Orchestrator"}
+            ],
+            "user_id": USER_ID
         }
-        r = requests.post(
-            f"{OPENMEMORY_URL}/v1/memories",
-            headers=headers,
-            json=data,
-            timeout=10
-        )
+        r = requests.post(f"{OPENMEMORY_URL}/api/v1/memories/", json=data, timeout=10)
         print(f"[OK] Add memory: {r.status_code}")
-        print(f"   Response: {r.json()}")
+        result = r.json()
+        print(f"   Memory ID: {result.get('id', 'N/A')}")
         return r.status_code in (200, 201)
     except Exception as e:
         print(f"[FAIL] Add memory failed: {e}")
         return False
 
-def test_search_memory():
+def test_search_memories():
     """Test searching memories"""
     try:
         params = {
             "query": "botMaster",
             "user_id": USER_ID
         }
-        r = requests.get(f"{OPENMEMORY_URL}/v1/memories/search", params=params, timeout=10)
-        print(f"[OK] Search memory: {r.status_code}")
+        r = requests.get(f"{OPENMEMORY_URL}/api/v1/memories/search/", params=params, timeout=10)
+        print(f"[OK] Search memories: {r.status_code}")
         results = r.json()
-        print(f"   Found {len(results.get('results', []))} memories")
+        print(f"   Found {len(results.get('results', []))} matches")
         return r.status_code == 200
     except Exception as e:
-        print(f"[FAIL] Search memory failed: {e}")
+        print(f"[FAIL] Search memories failed: {e}")
         return False
 
 if __name__ == "__main__":
-    print("Testing OpenMemory Connection...\n")
+    print("Testing OpenMemory API Connection...\n")
 
-    health_ok = test_health()
+    list_ok = test_list_memories()
     print()
 
-    if health_ok:
+    if list_ok:
         add_ok = test_add_memory()
         print()
 
         if add_ok:
-            search_ok = test_search_memory()
+            search_ok = test_search_memories()
             print()
 
             if search_ok:
-                print("[SUCCESS] OpenMemory Connection WORKING!")
+                print("[SUCCESS] OpenMemory API fully functional!")
             else:
-                print("[WARN] Search failed but API is responding")
+                print("[WARN] Search failed but basic API works")
         else:
-            print("[WARN] Add memory failed but API is responding")
+            print("[WARN] Add failed but read API works")
     else:
-        print("[FAIL] OpenMemory API not responding - check Docker containers")
+        print("[FAIL] OpenMemory API not responding - check Docker")
