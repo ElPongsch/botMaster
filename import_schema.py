@@ -34,22 +34,25 @@ def import_schema():
 
         executed = 0
         for i, statement in enumerate(statements, 1):
-            # Skip comments and USE statements (already connected to DB)
-            if statement.startswith('--') or statement.upper().startswith('USE '):
-                print(f"[SKIP] Statement {i}: {statement[:60]}...")
+            # Remove comments from statement (keep only SQL)
+            lines = statement.split('\n')
+            sql_lines = [line for line in lines if not line.strip().startswith('--')]
+            clean_statement = '\n'.join(sql_lines).strip()
+
+            # Skip empty statements and USE statements
+            if not clean_statement or clean_statement.upper().startswith('USE '):
                 continue
 
             try:
                 # Extract first word for logging
-                first_word = statement.split()[0].upper()
-                print(f"[EXEC] Statement {i}: {first_word} - {statement[:80]}...")
-                cursor.execute(statement)
+                first_word = clean_statement.split()[0].upper()
+                print(f"[EXEC] Statement {i}: {first_word}...")
+                cursor.execute(clean_statement)
                 conn.commit()
                 executed += 1
                 print(f"[OK] Statement {i}: {first_word} executed successfully")
             except pymysql.Error as e:
-                print(f"[WARN] Statement {i} failed: {e}")
-                print(f"       SQL: {statement[:200]}...")
+                print(f"[WARN] Statement {i} ({first_word}) failed: {e}")
                 # Continue with other statements
                 continue
 
